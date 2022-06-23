@@ -1,20 +1,41 @@
-module PointCamera
+module ImagePlane
 
-export screen, Photon, initCoords
+export screen, Photon, initConds
 
 """
-screen(FoV, N::Integer)
+------------------------------------------------------------
+This module defines the image plane as screen to receive the 
+photons and the initial conditions for each photon
+------------------------------------------------------------
+Functions:
+screen: defines a square NxN pixels screen
+Photon: structure to create each of the photons that will be 
+        traced back onto the accretion structure
+initCoords: defines the initial coordinates for a Photon
+------------------------------------------------------------
+@author: ashcat - 2022
+"""
+
+
+"""
+screen(Ssize, N::Integer)
 ------------------------------------------------------------
 Defines a square NxN pixels screen.
-Returns the ranges of the cordinates alpha and beta 
-in the image plane.
 ------------------------------------------------------------
 Arguments:
-FoV : Field of View in radians
-N : Number of pixels wanted
+Ssize: Half of the Screen size (in units of M). The screen 
+       will go from -Ssize to +Ssize
+N: number of pixels in the screen
+------------------------------------------------------------
+Returns: 
+The ranges of the celestial cordinates and the total number 
+of pixels in the screen
+Alpha : Horizontal celestial coordinate
+Beta : Vertical celestial coordinate
+numPixels : Number of pixels (odd number) in each direction
 ------------------------------------------------------------
 """
-function screen(FoV, N::Integer)
+function screen(Ssize, N::Integer)
 	# We will use an odd number of pixels in each direction
 	if iseven(N) 
 		numPixels = N + 1
@@ -22,13 +43,14 @@ function screen(FoV, N::Integer)
 		numPixels = N
 	end
 
-	alphaRange = LinRange(-FoV/2, FoV/2, numPixels)
-    betaRange = LinRange(-FoV/2, FoV/2, numPixels)
-    println("\nPoint Camera")
+	alphaRange = LinRange(-Ssize, Ssize, numPixels)
+    betaRange = LinRange(-Ssize, Ssize, numPixels)
+    println("\nImage Plane")
     println("\nSize of the screen in Pixels: $numPixels X $numPixels")
     println("\nTotal Number of Pixels: $(numPixels*numPixels)\n")
     return alphaRange, betaRange, numPixels
 end
+
 
 
 """
@@ -50,13 +72,14 @@ end
 
 
 """
-initCoords(p::Photon, D, inclntn, metric; K0 = 1.)
+FIRST FORM
+initConds(p::Photon, D, inclntn, metric; K0 = 1.)
 ------------------------------------------------------------
 Calculates the initial parameters for a photon
 ------------------------------------------------------------
 Arguments:
-p : Photon 
-D : Distance between compact object and point camera [kpc]
+p : Photon 'structure'
+D : Distance between compact object and image plane [kpc]
 inclntn : Inclination angle [radians]
 metric : metric tensor in the region of the camera. ::Vector
 		 grr = g[1]
@@ -64,27 +87,32 @@ metric : metric tensor in the region of the camera. ::Vector
 		 gphph = g[3]
 		 gtt = g[4]
 		 gtphi = g[5]
-K0 : Magnitude of the momentum vector for the photon
+K0 = 1 : Magnitude of the momentum vector for the photon
 ------------------------------------------------------------
 Returns:
 xk0 : Vector with the initial values of position and 
-      momentum at the camera location.
+      momentum at the image plane.
       [r, theta, phi, t, k_r, k_theta, k_phi, k_t]
 ------------------------------------------------------------
 """
-function initCoords(p::Photon, D, inclntn, metric; K0 = 1.)
-	# The camera is a point, therefore the initial position is
-	# the same for all photons!
+function initConds(p::Photon, D, inclntn, metric; K0 = 1.)
+	# Transformation from (Alpha, Beta, D) to (r, theta, phi)
 	xk0 = zeros(8)
-	xk0[1] = D
-    xk0[2] = inclntn
-    xk0[3] = 0.
+	xk0[1] = sqrt(p.alpha^2 + p.beta^2 + D^2)
+    xk0[2] = acos((p.beta*sin(inclntn) + D*cos(inclntn))/xk0[1])
+    xk0[3] = atan(p.alpha/(D*sin(inclntn) - p.beta*cos(inclntn)))
     xk0[4] = 0.
         
     # Initial 4-momentum components
-    kr =  K0*cos(p.beta)*cos(p.alpha)
-    ktheta = -(K0*sin(p.beta)/D)
-    kphi = K0*cos(p.beta)*sin(p.alpha)/(D*sin(inclntn))
+    kr =  (D/xk0[1])*K0
+
+    aux = p.alpha^2 + (-p.beta*cos(inclntn) + D*sin(inclntn))^2
+
+    ktheta = (K0/sqrt(aux))*(-cos(inclntn) 
+                           +(p.beta*sin(inclntn) + D*cos(inclntn))
+                *(D/(xk0[1]^2)))
+
+    kphi = -p.alpha*sin(inclntn)*K0/aux
     kt = sqrt(kr^2 + xk0[1]^2 * ktheta^2 + xk0[1]^2*sin(xk0[2])^2 *kphi^2)
     
     g = metric(xk0[1:4])
@@ -96,19 +124,50 @@ function initCoords(p::Photon, D, inclntn, metric; K0 = 1.)
     return xk0
 end
 
-function initCoords(alpha, beta, D, inclntn, metric; K0 = 1.)
-	# The camera is a point, therefore the initial position is
-	# the same for all photons!
-	xk0 = zeros(8)
-	xk0[1] = D
-    xk0[2] = inclntn
-    xk0[3] = 0.
+
+"""
+SECOND FORM
+initConds(alpha, beta, D, inclntn, metric; K0 = 1.)
+------------------------------------------------------------
+Calculates the initial parameters for a photon
+------------------------------------------------------------
+Arguments:
+alpha : Horizontal celestial coordinate of the photon
+beta  : Vertical celestial coordinate of the photon
+D : Distance between compact object and image plane [kpc]
+inclntn : Inclination angle [radians]
+metric : metric tensor in the region of the camera. ::Vector
+         grr = g[1]
+         gthth = g[2]
+         gphph = g[3]
+         gtt = g[4]
+         gtphi = g[5]
+K0 = 1 : Magnitude of the momentum vector for the photon
+------------------------------------------------------------
+Returns:
+xk0 : Vector with the initial values of position and 
+      momentum at the image plane.
+      [r, theta, phi, t, k_r, k_theta, k_phi, k_t]
+------------------------------------------------------------
+"""
+function initConds(alpha, beta, D, inclntn, metric; K0 = 1.)
+    # Transformation from (alpha, beta, D) to (r, theta, phi)
+    xk0 = zeros(8)
+    xk0[1] = sqrt(alpha^2 + beta^2 + D^2)
+    xk0[2] = acos((beta*sin(inclntn) + D*cos(inclntn))/xk0[1])
+    xk0[3] = atan(alpha/(D*sin(inclntn) - beta*cos(inclntn)))
     xk0[4] = 0.
         
     # Initial 4-momentum components
-    kr =  K0*cos(beta)*cos(alpha)
-    ktheta = -(K0*sin(beta)/D)
-    kphi = K0*cos(beta)*sin(alpha)/(D*sin(inclntn))
+    kr =  (D/xk0[1])*K0
+
+    aux = alpha^2 + (-beta*cos(inclntn) + D*sin(inclntn))^2
+
+    ktheta = (K0/sqrt(aux))*(-cos(inclntn) 
+                           +(beta*sin(inclntn) + D*cos(inclntn))
+                *(D/(xk0[1]^2)))
+
+    kphi = -alpha*sin(inclntn)*K0/aux
     kt = sqrt(kr^2 + xk0[1]^2 * ktheta^2 + xk0[1]^2*sin(xk0[2])^2 *kphi^2)
     
     g = metric(xk0[1:4])
@@ -119,6 +178,7 @@ function initCoords(alpha, beta, D, inclntn, metric; K0 = 1.)
 
     return xk0
 end
+
 
 end # end of module
 
