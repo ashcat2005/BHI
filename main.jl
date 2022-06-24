@@ -1,12 +1,48 @@
-include("screen/imageplane.jl")
-include("metrics/minkowski.jl")
 
-using .Minkowski
-using .ImagePlane
+include("config.jl")
+import .config as cfg
+
+println("\nReading Parameters \n")
+
+
+if cfg.st == "Minkowski"
+	include("metrics/minkowski.jl")
+	using .Minkowski
+	println("\nSpacetime: Minkowski")
+else
+	println("\nThe selected spacetime is not available\n")
+	exit()
+end
+
+if cfg.structure == 1
+	include("structures/simpledisk.jl")
+	using .SimpleDisk
+	r_in = cfg.r_in
+	r_out = cfg.r_out
+	println("Accretion Structure: Simple Disk")
+else
+	println("\nThe selected accretion structure is not available\n")
+	exit()
+end
+
+if cfg.screenType == 1
+	include("screen/imageplane.jl")
+	using .ImagePlane
+	distance = cfg.distance
+	inclination = cfg.inclination
+	screensize = cfg.screensize
+	numberOfPixels = cfg.numberOfPixels
+	println("Screen Type: Image Plane")
+else
+	println("\nThe selected screen is not available\n")
+	exit()
+end
+
 
 using DifferentialEquations
-using Plots
 using Printf
+#using BenchmarkTools
+using JLD
 
 
 
@@ -52,35 +88,37 @@ function geoInteg(geodesics, xk0)
 end
 
 
-# Initial parameters of the system 
-# (These will be loaded from a configuration file in a 
-#  future version)
-screensize = 20
-N = 50
-D = 100.
-inclntn = pi/4
 
-
-# Screen definition
-alphaRange, betaRange, numPix = screen(screensize, N)
+# Screen parameters definition
+alphaRange, betaRange, numPix = screen(screensize, numberOfPixels)
 totalPix = numPix*numPix
 
-# Final radial position of the photon
-rfdata = zeros(length(alphaRange), length(betaRange))
 
+# Energy information
+photonEnergy = zeros(numPix, numPix)
+
+
+k=0 # Percentage of advance counter
 # Integration for all the photons at the image plane
-k=0
-for i in 1:length(alphaRange), j in 1:length(betaRange)
-    xkf = geoInteg(geodesics, initConds(alphaRange[i],betaRange[j], D, inclntn, metric))
-    rfdata[i,j] = xkf[1]
+@time for i in 1:length(alphaRange), j in 1:length(betaRange)
+    xkf = geoInteg(geodesics, initConds(alphaRange[i],betaRange[j], distance, inclination, metric))
+    photonEnergy[i,j] = emission(xkf[1]; r_in=r_in, r_out=r_out)
     @printf("%.2f %%", k*100/totalPix)
     println()
     global k += 1
 end
 
+# Save the image data
+save("data/ImageData.jld", "ImageData", photonEnergy)
 
-# Image
-img = heatmap(1:size(rfdata,1), 1:size(rfdata,2), rfdata)
-savefig(img, "diskimage.pdf")
-display(img)
-readline()
+
+
+if cfg.showImage == true 
+	include("common/image.jl")
+	import .Image as img
+	img.createImage(photonEnergy, numPix, cfg.saveImage; cfg.imageName)
+else
+	println("\nImage will not be saved.")
+end
+
+
